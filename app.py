@@ -1,104 +1,88 @@
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, render_template
 import requests
 from api import API_KEY
+
 app = Flask(__name__)
 
-BASE_URL = "http://dataservice.accuweather.com"
+API_BASE_URL = "http://dataservice.accuweather.com"
 
-# Функция для проверки неблагоприятности погодных условий
-def check_bad_weather(mn_t, mx_t, wind_speed, rain_prob):
-    if mn_t < 0 or mx_t > 35:
+def assess_weather_conditions(min_temp, max_temp, wind_speed, precipitation_chance):
+    if min_temp < 0 or max_temp > 35:
         return "Температура экстремальна!"
     if wind_speed > 50:
         return "Сильный ветер!"
-    if rain_prob > 70:
+    if precipitation_chance > 70:
         return "Высокая вероятность осадков!"
     return "Погода благоприятная."
 
-# Функция для получения location_key по координатам
-def get_location_key(lat, lon):
-    weather_url = f"{BASE_URL}/locations/v1/cities/geoposition/search?apikey={API_KEY}&q={lat}%2C{lon}"
-    try:
-        loc_data = requests.get(weather_url)
-        loc_data = loc_data.json()
-        loc_key = loc_data['Key']
-        return loc_key
-    except Exception as e:
-        return render_template('index.html', error = "Недоступные данные ключа")
+def fetch_location_key(latitude, longitude):
+    url = f"{API_BASE_URL}/locations/v1/cities/geoposition/search?apikey={API_KEY}&q={latitude}%2C{longitude}"
+    response = requests.get(url)
+    
+    if response.ok:
+        return response.json().get('Key')
+    return None
 
-# Функция для получения данных о погоде по координатам
-def get_weather_data(location_key):
-    weather_url = f"{BASE_URL}/forecasts/v1/daily/1day/{location_key}?apikey={API_KEY}&language=en-us&details=true&metric=true"
-    try:
-        response = requests.get(weather_url)
-        if response.status_code != 200:
-            return None
+def fetch_weather_info(location_key):
+    url = f"{API_BASE_URL}/forecasts/v1/daily/1day/{location_key}?apikey={API_KEY}&language=en-us&details=true&metric=true"
+    response = requests.get(url)
+    
+    if response.ok:
         return response.json()
-    except Exception as e:
-        return render_template('index.html', error = "Недоступные данные погоды")
+    return None
 
-# Главная страница
 @app.route('/')
-def home():
+def index():
     return render_template('index.html')
 
-# Маршрут для получения прогноза погоды
 @app.route('/weather', methods=['POST'])
-def weather():
-    # Получаем данные из формы
-    st_latitude = request.form['lat_st']
-    st_longitude = request.form['lon_st']
-    end_latitude = request.form['lat_end']
-    end_longitude = request.form['lon_end']
+def weather_forecast():
+    start_lat = request.form['lat_st']
+    start_lon = request.form['lon_st']
+    end_lat = request.form['lat_end']
+    end_lon = request.form['lon_end']
 
-    # Проверка, что все поля заполнены
-    if not st_latitude or not st_longitude or not end_latitude or not end_longitude:
+    if not all([start_lat, start_lon, end_lat, end_lon]):
         return "Ошибка: Укажите все координаты!", 400
 
-    # Получаем location_key для начальной точки
-    location_key_st = get_location_key(st_latitude, st_longitude)
-    if not location_key_st:
+    start_location_key = fetch_location_key(start_lat, start_lon)
+    if not start_location_key:
         return "Ошибка: Не удалось найти начальную точку!", 400
 
-    # Получаем location_key для конечной точки
-    location_key_end = get_location_key(end_latitude, end_longitude)
-    if not location_key_end:
+    end_location_key = fetch_location_key(end_lat, end_lon)
+    if not end_location_key:
         return "Ошибка: Не удалось найти конечную точку!", 400
 
-    # Получаем данные о погоде для начальной и конечной точек
-    weather_data_st = get_weather_data(location_key_st)
-    weather_data_end = get_weather_data(location_key_end)
+    start_weather_info = fetch_weather_info(start_location_key)
+    end_weather_info = fetch_weather_info(end_location_key)
 
-    if not weather_data_st or not weather_data_end:
+    if not start_weather_info or not end_weather_info:
         return "Ошибка: Не удалось получить данные о погоде!", 400
 
-    # Извлекаем ключевые данные для начальной точки
-    forecast_st = weather_data_st['DailyForecasts'][0]
-    mx_temperature_st = forecast_st['Temperature']['Maximum']['Value']
-    mn_temperature_st = forecast_st['Temperature']['Minimum']['Value']
-    wind_speed_st = forecast_st['Day']['Wind']['Speed']['Value']
-    rain_prob_st = forecast_st['Day']['PrecipitationProbability']
+    start_forecast = start_weather_info['DailyForecasts'][0]
+    end_forecast = end_weather_info['DailyForecasts'][0]
 
-    # Извлекаем ключевые данные для конечной точки
-    forecast_end = weather_data_end['DailyForecasts'][0]
-    mx_temperature_end = forecast_end['Temperature']['Maximum']['Value']
-    mn_temperature_end = forecast_end['Temperature']['Minimum']['Value']
-    wind_speed_end = forecast_end['Day']['Wind']['Speed']['Value']
-    rain_prob_end = forecast_end['Day']['PrecipitationProbability']
+    start_report = assess_weather_conditions(
+        start_forecast['Temperature']['Minimum']['Value'],
+        start_forecast['Temperature']['Maximum']['Value'],
+        start_forecast['Day']['Wind']['Speed']['Value'],
+        start_forecast['Day']['PrecipitationProbability']
+    )
 
-    # Проверяем погодные условия для начальной и конечной точек
-    weather_report_st = check_bad_weather(mn_temperature_st, mx_temperature_st, wind_speed_st, rain_prob_st)
-    weather_report_end = check_bad_weather(mn_temperature_end, mx_temperature_end, wind_speed_end, rain_prob_end)
+    end_report = assess_weather_conditions(
+        end_forecast['Temperature']['Minimum']['Value'],
+        end_forecast['Temperature']['Maximum']['Value'],
+        end_forecast['Day']['Wind']['Speed']['Value'],
+        end_forecast['Day']['PrecipitationProbability']
+    )
 
-    # Возвращаем результат пользователю
     return f'''
         <h2>Прогноз для начальной точки:</h2>
-        <p>{weather_report_st}</p>
+        <p>{start_report}</p>
         <h2>Прогноз для конечной точки:</h2>
-        <p>{weather_report_end}</p>
+        <p>{end_report}</p>
         <a href="/">Назад</a>
     '''
 
-# Запуск сервера
 if __name__ == '__main__':
     app.run(debug=True)
