@@ -1,3 +1,1 @@
-#Введите ваш API-ключ
-
-API_KEY = ""
+API_KEY = "0UHRE4LpiqMd0iLcVbEbeOZknZaDH2nn"
